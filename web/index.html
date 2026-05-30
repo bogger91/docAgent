@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>docAgent — сравнение docx через Qwen3</title>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f1115; --panel: #1a1d24; --border: #2a2f3a;
+      --fg: #e6e8ec; --muted: #8a92a3; --accent: #4f8cff; --ok: #34c759; --err: #ff453a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--fg);
+      font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    .wrap { max-width: 900px; margin: 0 auto; padding: 32px 20px 80px; }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    .sub { color: var(--muted); margin: 0 0 24px; font-size: 14px; }
+    .status { font-size: 13px; padding: 6px 10px; border-radius: 6px; display: inline-block; margin-bottom: 20px; }
+    .status.ok { background: rgba(52,199,89,.12); color: var(--ok); }
+    .status.err { background: rgba(255,69,58,.12); color: var(--err); }
+    .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 20px; margin-bottom: 16px; }
+    .row { display: flex; gap: 16px; }
+    .row > div { flex: 1; }
+    label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+    input[type=file] { width: 100%; color: var(--fg); font-size: 13px; }
+    textarea {
+      width: 100%; min-height: 70px; resize: vertical; background: var(--bg);
+      color: var(--fg); border: 1px solid var(--border); border-radius: 8px; padding: 10px; font: inherit;
+    }
+    button {
+      background: var(--accent); color: #fff; border: 0; border-radius: 8px;
+      padding: 11px 20px; font-size: 15px; font-weight: 600; cursor: pointer;
+    }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .secondary { background: transparent; border: 1px solid var(--border); color: var(--fg); }
+    .actions { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
+    .spinner {
+      width: 18px; height: 18px; border: 2px solid var(--border);
+      border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .progress { color: var(--muted); font-size: 13px; }
+    #report { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 24px; margin-top: 16px; }
+    #report h1, #report h2, #report h3 { line-height: 1.3; }
+    #report table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+    #report th, #report td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+    #report code { background: var(--bg); padding: 2px 5px; border-radius: 4px; }
+    .meta { color: var(--muted); font-size: 12px; margin-bottom: 12px; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>docAgent</h1>
+    <p class="sub">Сравнение двух версий .docx через self-hosted Qwen3</p>
+    <span id="health" class="status">Проверка связи с моделью…</span>
+
+    <div class="panel">
+      <div class="row">
+        <div>
+          <label>Версия A (.docx)</label>
+          <input type="file" id="fileA" accept=".docx" />
+        </div>
+        <div>
+          <label>Версия B (.docx)</label>
+          <input type="file" id="fileB" accept=".docx" />
+        </div>
+      </div>
+      <div style="margin-top:16px">
+        <label>Что анализировать (необязательно)</label>
+        <textarea id="focus" placeholder="Например: обрати внимание на изменения сроков оплаты, штрафов и условий расторжения"></textarea>
+      </div>
+      <div class="actions">
+        <button id="run">Сравнить</button>
+        <div id="busy" class="actions hidden">
+          <div class="spinner"></div>
+          <span id="progress" class="progress">Анализ…</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="result" class="hidden">
+      <div class="actions" style="margin-bottom:8px">
+        <button class="secondary" id="download">⤓ Скачать отчёт (.md)</button>
+        <button class="secondary" id="copy">⧉ Копировать</button>
+      </div>
+      <div id="report"></div>
+    </div>
+  </div>
+
+  <script>
+    let lastMarkdown = "";
+    let lastNames = { a: "A", b: "B" };
+
+    async function checkHealth() {
+      const el = document.getElementById("health");
+      try {
+        const r = await fetch("/api/health");
+        const d = await r.json();
+        el.className = "status " + (d.ok ? "ok" : "err");
+        el.textContent = d.ok
+          ? `● ${d.model} @ ${d.base_url} (контекст ${d.max_context} ток.)`
+          : `● ${d.message}`;
+      } catch (e) {
+        el.className = "status err";
+        el.textContent = "● Сервер недоступен";
+      }
+    }
+
+    document.getElementById("run").addEventListener("click", async () => {
+      const fa = document.getElementById("fileA").files[0];
+      const fb = document.getElementById("fileB").files[0];
+      if (!fa || !fb) { alert("Выберите оба файла .docx"); return; }
+
+      const fd = new FormData();
+      fd.append("file_a", fa);
+      fd.append("file_b", fb);
+      fd.append("focus", document.getElementById("focus").value);
+      lastNames = { a: fa.name, b: fb.name };
+
+      const runBtn = document.getElementById("run");
+      const busy = document.getElementById("busy");
+      const result = document.getElementById("result");
+      runBtn.disabled = true;
+      busy.classList.remove("hidden");
+      result.classList.add("hidden");
+      document.getElementById("progress").textContent =
+        "Анализ может занять до нескольких минут на больших документах…";
+
+      try {
+        const r = await fetch("/api/compare", { method: "POST", body: fd });
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({ detail: r.statusText }));
+          throw new Error(err.detail || "Ошибка сервера");
+        }
+        const d = await r.json();
+        lastMarkdown = d.report_markdown;
+        const modeLabel = d.mode === "whole"
+          ? "целиком, один запрос"
+          : `по секциям (${d.sections_compared})`;
+        document.getElementById("report").innerHTML =
+          `<div class="meta">${d.doc_a_name} → ${d.doc_b_name} · режим: ${modeLabel} · `
+          + `${d.tokens_a} / ${d.tokens_b} ток.</div>`
+          + marked.parse(d.report_markdown);
+        result.classList.remove("hidden");
+      } catch (e) {
+        alert("Не удалось выполнить сравнение:\n" + e.message);
+      } finally {
+        runBtn.disabled = false;
+        busy.classList.add("hidden");
+      }
+    });
+
+    document.getElementById("download").addEventListener("click", () => {
+      const blob = new Blob([lastMarkdown], { type: "text/markdown" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `сравнение_${lastNames.a}_vs_${lastNames.b}.md`.replace(/\.docx/g, "");
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    document.getElementById("copy").addEventListener("click", () => {
+      navigator.clipboard.writeText(lastMarkdown);
+    });
+
+    checkHealth();
+  </script>
+</body>
+</html>
