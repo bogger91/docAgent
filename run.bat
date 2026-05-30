@@ -31,16 +31,35 @@ if not exist ".venv\Scripts\python.exe" (
         pause
         exit /b 1
     )
+) else (
+    echo [1/4] Виртуальное окружение найдено.
+)
+
+REM --- Проверяем, что зависимости РЕАЛЬНО установлены (а не просто есть venv).
+REM Если предыдущий pip install падал (нет сети/прокси), venv остаётся пустым,
+REM и сервер падает с ModuleNotFoundError. Поэтому проверяем сам пакет. ---
+".venv\Scripts\python.exe" -c "import fastapi, uvicorn, docx, openai" >nul 2>nul
+if errorlevel 1 (
     echo [2/4] Устанавливаю зависимости...
-    ".venv\Scripts\python.exe" -m pip install --upgrade pip >nul
+    ".venv\Scripts\python.exe" -m pip install --upgrade pip
     ".venv\Scripts\python.exe" -m pip install -r requirements.txt
     if errorlevel 1 (
+        echo.
         echo [ОШИБКА] Не удалось установить зависимости.
+        echo Частые причины: нет доступа в интернет или корпоративный прокси.
+        echo Если используется прокси, задайте перед запуском:
+        echo     set HTTPS_PROXY=http://ПОЛЬЗОВАТЕЛЬ:ПАРОЛЬ@адрес:порт
+        pause
+        exit /b 1
+    )
+    REM Повторная проверка: установка могла "пройти", но пакета всё равно нет.
+    ".venv\Scripts\python.exe" -c "import fastapi" >nul 2>nul
+    if errorlevel 1 (
+        echo [ОШИБКА] fastapi не установился. Прокрутите вывод pip выше и пришлите ошибку.
         pause
         exit /b 1
     )
 ) else (
-    echo [1/4] Виртуальное окружение найдено.
     echo [2/4] Зависимости уже установлены.
 )
 
