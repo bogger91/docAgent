@@ -93,6 +93,16 @@ def _compare_sectioned(
     doc_a: Document, doc_b: Document, user_focus: str, progress: ProgressCb
 ) -> tuple[str, int]:
     pairs = align(doc_a, doc_b)
+
+    # Защита от DoS: ограничиваем число пар секций, чтобы битый/вредоносный docx
+    # с тысячами абзацев не породил тысячи запросов к LLM.
+    if len(pairs) > settings.max_section_pairs:
+        raise ValueError(
+            f"Слишком много секций для сравнения: {len(pairs)} "
+            f"(лимит {settings.max_section_pairs}). Проверьте документы или "
+            f"увеличьте MAX_SECTION_PAIRS."
+        )
+
     notes: list[str] = []
     total = len(pairs) or 1
     compared = 0

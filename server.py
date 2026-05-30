@@ -35,10 +35,22 @@ def health() -> JSONResponse:
     )
 
 
+MAX_FILE_BYTES = MAX_FILE_MB * 1024 * 1024
+
+
+def _check_size_before_read(file: UploadFile) -> None:
+    """Отклоняет слишком большой файл ДО чтения его в память.
+
+    Starlette проставляет UploadFile.size из заголовков multipart — это позволяет
+    не загружать гигабайтный файл в RAM ради того, чтобы потом его отвергнуть."""
+    if file.size is not None and file.size > MAX_FILE_BYTES:
+        raise HTTPException(400, f"Файл '{file.filename}' больше {MAX_FILE_MB} МБ")
+
+
 def _validate(file: UploadFile, data: bytes) -> None:
     if not file.filename or not file.filename.lower().endswith(".docx"):
         raise HTTPException(400, f"Файл '{file.filename}' не .docx")
-    if len(data) > MAX_FILE_MB * 1024 * 1024:
+    if len(data) > MAX_FILE_BYTES:
         raise HTTPException(400, f"Файл '{file.filename}' больше {MAX_FILE_MB} МБ")
     if not data:
         raise HTTPException(400, f"Файл '{file.filename}' пуст")
@@ -50,6 +62,9 @@ async def compare(
     file_b: UploadFile,
     focus: str = Form(""),
 ) -> JSONResponse:
+    # Сначала проверяем заявленный размер, лишь затем читаем в память.
+    _check_size_before_read(file_a)
+    _check_size_before_read(file_b)
     data_a = await file_a.read()
     data_b = await file_b.read()
     _validate(file_a, data_a)

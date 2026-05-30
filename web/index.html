@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>docAgent — сравнение docx через Qwen3</title>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
   <style>
     :root {
       --bg: #0f1115; --panel: #1a1d24; --border: #2a2f3a;
@@ -95,6 +96,13 @@
     let lastMarkdown = "";
     let lastNames = { a: "A", b: "B" };
 
+    // Экранирование произвольного текста перед вставкой в HTML (имена файлов и т.п.).
+    function escapeHtml(s) {
+      return String(s ?? "").replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+      }[c]));
+    }
+
     async function checkHealth() {
       const el = document.getElementById("health");
       try {
@@ -141,10 +149,13 @@
         const modeLabel = d.mode === "whole"
           ? "целиком, один запрос"
           : `по секциям (${d.sections_compared})`;
-        document.getElementById("report").innerHTML =
-          `<div class="meta">${d.doc_a_name} → ${d.doc_b_name} · режим: ${modeLabel} · `
-          + `${d.tokens_a} / ${d.tokens_b} ток.</div>`
-          + marked.parse(d.report_markdown);
+        const meta =
+          `<div class="meta">${escapeHtml(d.doc_a_name)} → ${escapeHtml(d.doc_b_name)} `
+          + `· режим: ${escapeHtml(modeLabel)} · ${d.tokens_a} / ${d.tokens_b} ток.</div>`;
+        // Ответ модели рендерим как markdown, но санитизируем результат: модель
+        // (или содержимое документа) может вернуть <script>/<img onerror> и т.п.
+        const safeReport = DOMPurify.sanitize(marked.parse(d.report_markdown));
+        document.getElementById("report").innerHTML = meta + safeReport;
         result.classList.remove("hidden");
       } catch (e) {
         alert("Не удалось выполнить сравнение:\n" + e.message);

@@ -197,3 +197,53 @@ def test_compare_surfaces_llm_error(monkeypatch, contract_a, contract_b):
     )
     assert r.status_code == 500
     assert "модель недоступна" in r.json()["detail"]
+
+
+# --- DoS-лимиты ---------------------------------------------------------------
+
+def test_reject_oversized_file(monkeypatch, contract_a):
+    """Файл, чей заявленный size превышает лимит, отвергается до обработки."""
+    monkeypatch.setattr(server, "MAX_FILE_BYTES", 1024)  # 1 КБ для теста
+
+    big = b"PK" + b"\x00" * 5000  # «большой» файл (>1 КБ)
+    r = client.post(
+        "/api/compare",
+        files={
+            "file_a": ("big.docx", big, "application/octet-stream"),
+            "file_b": ("b.docx", contract_a, "application/octet-stream"),
+        },
+    )
+    assert r.status_code == 400
+    assert "больше" in r.json()["detail"]
+
+
+def test_section_pairs_limit(monkeypatch, contract_a, contract_b):
+    """При превышении MAX_SECTION_PAIRS режим sectioned отдаёт понятную ошибку,
+    а не уходит в тысячи запросов к LLM."""
+    import dataclasses
+
+    import core.comparator as comparator
+    from core.config import settings
+
+    monkeypatch.setattr(comparator, "fits_whole", lambda *a, **k: False)
+    # settings — frozen dataclass: подменяем его в неймспейсе comparator копией
+    # с урезанным лимитом (replace создаёт новый экземпляр, не трогая оригинал).
+    monkeypatch.setattr(
+        comparator, "settings", dataclasses.replace(settings, max_section_pairs=1)
+    )
+
+    # complete не должен вызываться вовсе — лимит срабатывает до запросов.
+    def must_not_call(*_a, **_k):
+        raise AssertionError("LLM не должен вызываться при превышении лимита секций")
+
+    monkeypatch.setattr(llm_client, "complete", must_not_call)
+
+    r = client.post(
+        "/api/compare",
+        files={
+            "file_a": ("a.docx", contract_a, "application/octet-stream"),
+            "file_b": ("b.docx", contract_b, "application/octet-stream"),
+        },
+    )
+    assert r.status_code == 500
+    assert "Слишком много секций" in r.json()["detail"]

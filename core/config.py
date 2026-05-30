@@ -37,6 +37,10 @@ class Settings:
     temperature: float = _get_float("TEMPERATURE", 0.2)
     request_timeout: int = _get_int("REQUEST_TIMEOUT", 600)
 
+    # Потолок числа пар секций для сравнения в режиме sectioned. Защищает от
+    # вредоносного/битого docx с тысячами абзацев → тысячами запросов к LLM.
+    max_section_pairs: int = _get_int("MAX_SECTION_PAIRS", 300)
+
     @property
     def doc_token_budget(self) -> int:
         """Сколько токенов остаётся под текст обоих документов в режиме «целиком»."""
