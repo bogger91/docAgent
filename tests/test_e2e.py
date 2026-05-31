@@ -74,6 +74,9 @@ def test_compare_whole_mode(monkeypatch, contract_a, contract_b):
     assert "стоимость" in body["report_markdown"].lower()
     assert body["tokens_a"] > 0 and body["tokens_b"] > 0
     assert len(calls) == 1  # один запрос к модели
+    # Извлечённый Markdown каждого документа возвращается для просмотра/скачивания.
+    assert "# " in body["markdown_a"]
+    assert "# " in body["markdown_b"]
 
 
 # --- /api/compare: режим sectioned --------------------------------------------

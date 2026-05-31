@@ -48,8 +48,8 @@ def _check_size_before_read(file: UploadFile) -> None:
 
 
 def _validate(file: UploadFile, data: bytes) -> None:
-    if not file.filename or not file.filename.lower().endswith(".docx"):
-        raise HTTPException(400, f"Файл '{file.filename}' не .docx")
+    if not file.filename or not file.filename.lower().endswith((".docx", ".pdf")):
+        raise HTTPException(400, f"Файл '{file.filename}' не .docx и не .pdf")
     if len(data) > MAX_FILE_BYTES:
         raise HTTPException(400, f"Файл '{file.filename}' больше {MAX_FILE_MB} МБ")
     if not data:
@@ -88,6 +88,8 @@ async def compare(
             "tokens_a": result.tokens_a,
             "tokens_b": result.tokens_b,
             "sections_compared": result.sections_compared,
+            "markdown_a": result.markdown_a,
+            "markdown_b": result.markdown_b,
         }
     )
 

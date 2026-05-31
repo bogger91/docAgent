@@ -8,7 +8,7 @@ from . import llm_client, prompts
 from .aligner import align
 from .chunker import count_tokens, fits_whole
 from .config import settings
-from .extractor import extract_document
+from .extractor import extract_document_with_markdown
 from .models import Document
 
 # Колбэк прогресса: (доля 0..1, текстовая метка). Используется UI для спиннера/лога.
@@ -24,6 +24,8 @@ class ComparisonResult:
     tokens_a: int
     tokens_b: int
     sections_compared: int
+    markdown_a: str
+    markdown_b: str
 
 
 def _noop(_frac: float, _msg: str) -> None:
@@ -42,8 +44,8 @@ def compare_documents(
     progress = progress or _noop
 
     progress(0.05, "Извлечение текста из документов…")
-    doc_a = extract_document(file_a, name_a)
-    doc_b = extract_document(file_b, name_b)
+    doc_a, md_a = extract_document_with_markdown(file_a, name_a)
+    doc_b, md_b = extract_document_with_markdown(file_b, name_b)
 
     text_a = doc_a.full_text
     text_b = doc_b.full_text
@@ -76,6 +78,8 @@ def compare_documents(
         tokens_a=tokens_a,
         tokens_b=tokens_b,
         sections_compared=sections_compared,
+        markdown_a=md_a,
+        markdown_b=md_b,
     )
 
 

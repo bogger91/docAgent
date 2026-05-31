@@ -1,11 +1,19 @@
-"""Клиент к self-hosted Qwen3 через OpenAI-совместимый endpoint."""
+"""Клиент к self-hosted Qwen3 через OpenAI-совместимый endpoint.
+
+При MOCK_LLM=true (или любое непустое значение) реальные запросы к модели
+не выполняются — вместо них возвращается заглушка. Удобно для ручного
+тестирования UI без запущенного Ollama/vLLM.
+"""
 from __future__ import annotations
 
+import os
 import re
 
 from openai import OpenAI
 
 from .config import settings
+
+_MOCK = bool(os.getenv("MOCK_LLM", ""))
 
 _client = OpenAI(
     base_url=settings.base_url,
@@ -24,6 +32,13 @@ def _strip_thinking(text: str) -> str:
 
 def complete(system_prompt: str, user_prompt: str) -> str:
     """Один запрос к модели. Возвращает текст ответа без блока рассуждений."""
+    if _MOCK:
+        return (
+            "# Отчёт (mock-режим)\n\n"
+            "> Реальная модель не подключена (`MOCK_LLM=true`).\n\n"
+            "Документы успешно извлечены и отправлены бы на сравнение — "
+            "подключите Qwen3 для получения настоящего анализа."
+        )
     resp = _client.chat.completions.create(
         model=settings.model,
         temperature=settings.temperature,
@@ -38,6 +53,8 @@ def complete(system_prompt: str, user_prompt: str) -> str:
 
 def health_check() -> tuple[bool, str]:
     """Проверка доступности endpoint и модели. Возвращает (ок, сообщение)."""
+    if _MOCK:
+        return True, f"MOCK-режим (MOCK_LLM=true) — реальная модель не используется"
     try:
         models = _client.models.list()
         ids = [m.id for m in models.data]

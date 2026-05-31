@@ -1,81 +1,56 @@
-"""Извлечение текста из .docx с сохранением структуры заголовков и таблиц."""
+"""Извлечение текста из документов через markitdown с восстановлением секций.
+
+markitdown отдаёт плоский Markdown (для .docx заголовки приходят как `#`/`##`,
+в т.ч. для русских стилей; для цифровых .pdf заголовков обычно нет). Структуру
+`Section[]`, на которой держится режим sectioned, восстанавливаем парсингом
+строк-заголовков `#`.
+"""
 from __future__ import annotations
 
+import re
 from io import BytesIO
 
-from docx import Document as DocxDocument
-from docx.document import Document as _DocxDocumentType
-from docx.oxml.table import CT_Tbl
-from docx.oxml.text.paragraph import CT_P
-from docx.table import Table, _Cell
-from docx.text.paragraph import Paragraph
+from markitdown import MarkItDown, StreamInfo
 
 from .models import Document, Section
 
+# Инициализация markitdown (magika) дорогая — создаём конвертер один раз на модуль.
+_md = MarkItDown()
 
-def _iter_block_items(parent):
-    """Обходит абзацы и таблицы в естественном порядке их следования в документе.
-
-    python-docx по умолчанию разделяет paragraphs и tables, теряя их взаимный
-    порядок. Здесь мы идём по XML-телу и сохраняем порядок.
-    """
-    if isinstance(parent, _DocxDocumentType):
-        parent_elm = parent.element.body
-    elif isinstance(parent, _Cell):
-        parent_elm = parent._tc
-    else:
-        raise TypeError(f"Unsupported parent type: {type(parent)!r}")
-
-    for child in parent_elm.iterchildren():
-        if isinstance(child, CT_P):
-            yield Paragraph(child, parent)
-        elif isinstance(child, CT_Tbl):
-            yield Table(child, parent)
+# Строка-заголовок Markdown: уровень = число решёток, остальное — текст заголовка.
+_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
 
 
-def _heading_level(paragraph: Paragraph) -> int | None:
-    """Возвращает уровень заголовка (1..9) или None, если абзац не заголовок."""
-    style = paragraph.style.name if paragraph.style else ""
-    if not style:
-        return None
-    # Поддерживаем англоязычные ("Heading 1") и русские ("Заголовок 1") стили.
-    for prefix in ("Heading", "Заголовок"):
-        if style.startswith(prefix):
-            tail = style[len(prefix):].strip()
-            if tail.isdigit():
-                return int(tail)
-    if style.lower() in ("title", "заголовок"):
-        return 1
-    return None
+def convert_to_markdown(data: bytes, name: str) -> str:
+    """Конвертирует байты документа (.docx/.pdf) в плоский Markdown."""
+    ext = ".pdf" if name.lower().endswith(".pdf") else ".docx"
+    try:
+        result = _md.convert_stream(
+            BytesIO(data), stream_info=StreamInfo(extension=ext)
+        )
+    except Exception as exc:  # noqa: BLE001 — наружу человекочитаемо.
+        raise ValueError(f"Не удалось извлечь текст из '{name}': {exc}") from exc
+    return result.text_content or ""
 
 
-def _table_to_markdown(table: Table) -> str:
-    """Простое представление таблицы как markdown — чтобы модель видела структуру."""
-    rows: list[str] = []
-    for r_idx, row in enumerate(table.rows):
-        cells = [c.text.strip().replace("\n", " ") for c in row.cells]
-        rows.append("| " + " | ".join(cells) + " |")
-        if r_idx == 0:
-            rows.append("| " + " | ".join("---" for _ in cells) + " |")
-    return "\n".join(rows)
+def parse_markdown_to_sections(markdown: str) -> list[Section]:
+    """Разбивает плоский Markdown на секции по заголовкам `#`.
 
-
-def extract_document(data: bytes, name: str) -> Document:
-    """Парсит байты .docx в структурированный Document."""
-    docx = DocxDocument(BytesIO(data))
-
+    Строки до первого заголовка собираются в преамбулу (`heading=""`, `level=0`),
+    но только если непустые. Если заголовков нет вовсе, а текст есть — весь текст
+    кладётся одной секцией уровня 0."""
     sections: list[Section] = []
     current_heading = ""
     current_level = 0
-    body_parts: list[str] = []
+    body_lines: list[str] = []
     index = 0
 
     def flush() -> None:
-        nonlocal index, body_parts
-        body = "\n".join(p for p in body_parts if p.strip())
-        # Не создаём пустых секций без заголовка и без текста.
-        if not current_heading and not body.strip():
-            body_parts = []
+        nonlocal index, body_lines
+        body = "\n".join(body_lines).strip()
+        # Не создаём пустых секций без заголовка и без текста (как старый extractor).
+        if not current_heading and not body:
+            body_lines = []
             return
         sections.append(
             Section(
@@ -86,40 +61,34 @@ def extract_document(data: bytes, name: str) -> Document:
             )
         )
         index += 1
-        body_parts = []
+        body_lines = []
 
-    for block in _iter_block_items(docx):
-        if isinstance(block, Paragraph):
-            level = _heading_level(block)
-            if level is not None and block.text.strip():
-                # Начинается новая секция — сохраняем предыдущую.
-                flush()
-                current_heading = block.text.strip()
-                current_level = level
-            elif block.text.strip():
-                body_parts.append(block.text.strip())
-        elif isinstance(block, Table):
-            md = _table_to_markdown(block)
-            if md.strip():
-                body_parts.append("\n" + md + "\n")
+    for line in markdown.splitlines():
+        m = _HEADING_RE.match(line)
+        if m:
+            flush()
+            current_level = len(m.group(1))
+            current_heading = m.group(2).strip()
+        else:
+            body_lines.append(line)
 
     flush()
+    return sections
 
+
+def extract_document_with_markdown(data: bytes, name: str) -> tuple[Document, str]:
+    """Извлекает Document и одновременно возвращает плоский Markdown документа.
+
+    Markdown считается один раз и переиспользуется: и для построения секций,
+    и для показа/скачивания на фронте."""
+    markdown = convert_to_markdown(data, name)
+    sections = parse_markdown_to_sections(markdown)
     if not sections:
-        # Документ без распознанных заголовков — кладём всё одной секцией.
-        sections.append(
-            Section(heading="", level=0, body=docx_plain_text(docx), index=0)
-        )
-
-    return Document(name=name, sections=sections)
+        # Пустой документ — одна пустая секция, чтобы full_text/режимы не падали.
+        sections.append(Section(heading="", level=0, body="", index=0))
+    return Document(name=name, sections=sections), markdown
 
 
-def docx_plain_text(docx) -> str:
-    """Фолбэк: весь текст документа плоско, если структура не распозналась."""
-    parts: list[str] = []
-    for block in _iter_block_items(docx):
-        if isinstance(block, Paragraph) and block.text.strip():
-            parts.append(block.text.strip())
-        elif isinstance(block, Table):
-            parts.append(_table_to_markdown(block))
-    return "\n".join(parts)
+def extract_document(data: bytes, name: str) -> Document:
+    """Парсит байты документа в структурированный Document."""
+    return extract_document_with_markdown(data, name)[0]
