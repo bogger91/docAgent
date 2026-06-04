@@ -6,8 +6,9 @@ from pathlib import Path
 from fastapi import FastAPI, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 
-from core.comparator import compare_documents
+from core.comparator import analyze_document, compare_documents
 from core.config import settings
+from core.extractor import extract_document_with_markdown
 from core.llm_client import health_check
 
 app = FastAPI(title="docAgent — сравнение docx через Qwen3")
@@ -92,6 +93,44 @@ async def compare(
             "markdown_b": result.markdown_b,
         }
     )
+
+
+@app.post("/api/analyze")
+async def analyze(
+    file: UploadFile,
+    question: str = Form(""),
+) -> JSONResponse:
+    _check_size_before_read(file)
+    data = await file.read()
+    _validate(file, data)
+
+    try:
+        result = analyze_document(data, file.filename or "doc.docx", question=question)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(500, f"Ошибка анализа: {exc}") from exc
+
+    return JSONResponse(
+        {
+            "report_markdown": result.report_markdown,
+            "doc_name": result.doc_name,
+            "tokens": result.tokens,
+            "markdown": result.markdown,
+        }
+    )
+
+
+@app.post("/api/convert")
+async def convert(
+    files: list[UploadFile],
+) -> JSONResponse:
+    results = []
+    for f in files:
+        _check_size_before_read(f)
+        data = await f.read()
+        _validate(f, data)
+        _doc, md = extract_document_with_markdown(data, f.filename or "doc.docx")
+        results.append({"name": f.filename, "markdown": md})
+    return JSONResponse({"files": results})
 
 
 if __name__ == "__main__":

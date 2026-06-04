@@ -3,13 +3,14 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>docAgent — сравнение docx через Qwen3</title>
+  <title>docAgent</title>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
   <style>
     :root {
       --bg: #0f1115; --panel: #1a1d24; --border: #2a2f3a;
       --fg: #e6e8ec; --muted: #8a92a3; --accent: #4f8cff; --ok: #34c759; --err: #ff453a;
+      --warn: #ff9f0a;
     }
     * { box-sizing: border-box; }
     body {
@@ -18,10 +19,21 @@
     }
     .wrap { max-width: 900px; margin: 0 auto; padding: 32px 20px 80px; }
     h1 { font-size: 22px; margin: 0 0 4px; }
-    .sub { color: var(--muted); margin: 0 0 24px; font-size: 14px; }
+    .sub { color: var(--muted); margin: 0 0 20px; font-size: 14px; }
     .status { font-size: 13px; padding: 6px 10px; border-radius: 6px; display: inline-block; margin-bottom: 20px; }
     .status.ok { background: rgba(52,199,89,.12); color: var(--ok); }
     .status.err { background: rgba(255,69,58,.12); color: var(--err); }
+
+    /* Tabs */
+    .tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid var(--border); padding-bottom: 0; }
+    .tab-btn {
+      background: transparent; border: 0; color: var(--muted); padding: 8px 16px;
+      font-size: 14px; font-weight: 500; cursor: pointer; border-radius: 8px 8px 0 0;
+      border-bottom: 2px solid transparent; margin-bottom: -1px;
+    }
+    .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .tab-btn:hover:not(.active) { color: var(--fg); }
+
     .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 20px; margin-bottom: 16px; }
     .row { display: flex; gap: 16px; }
     .row > div { flex: 1; }
@@ -36,89 +48,163 @@
       padding: 11px 20px; font-size: 15px; font-weight: 600; cursor: pointer;
     }
     button:disabled { opacity: .5; cursor: not-allowed; }
-    .secondary { background: transparent; border: 1px solid var(--border); color: var(--fg); }
-    .actions { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
+    .secondary { background: transparent; border: 1px solid var(--border); color: var(--fg); font-size: 13px; font-weight: 500; padding: 8px 14px; }
+    .convert-btn { background: transparent; border: 1px solid var(--warn); color: var(--warn); font-size: 13px; font-weight: 500; padding: 8px 14px; }
+    .convert-btn:disabled { opacity: .5; cursor: not-allowed; }
+    .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
     .spinner {
       width: 18px; height: 18px; border: 2px solid var(--border);
       border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
     .progress { color: var(--muted); font-size: 13px; }
-    #report { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 24px; margin-top: 16px; }
-    #report h1, #report h2, #report h3 { line-height: 1.3; }
-    #report table { border-collapse: collapse; width: 100%; margin: 12px 0; }
-    #report th, #report td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
-    #report code { background: var(--bg); padding: 2px 5px; border-radius: 4px; }
+    #report, #report-analyze { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 24px; margin-top: 16px; }
+    #report h1, #report h2, #report h3,
+    #report-analyze h1, #report-analyze h2, #report-analyze h3 { line-height: 1.3; }
+    #report table, #report-analyze table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+    #report th, #report td, #report-analyze th, #report-analyze td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+    #report code, #report-analyze code { background: var(--bg); padding: 2px 5px; border-radius: 4px; }
     .meta { color: var(--muted); font-size: 12px; margin-bottom: 12px; }
     .extracted { margin-top: 16px; border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; }
     .extracted summary { cursor: pointer; color: var(--muted); }
     .md-preview { margin-top: 10px; max-height: 360px; overflow: auto; white-space: pre-wrap;
       word-break: break-word; background: var(--bg); padding: 10px; border-radius: 6px; font-size: 13px; }
     .hidden { display: none; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* Convert result */
+    .convert-result { margin-top: 16px; }
+    .convert-item { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 12px; }
+    .convert-item-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; }
+    .convert-item-name { font-size: 13px; font-weight: 600; }
   </style>
 </head>
 <body>
   <div class="wrap">
     <h1>docAgent</h1>
-    <p class="sub">Сравнение двух версий .docx / .pdf через self-hosted Qwen3</p>
+    <p class="sub">Анализ и сравнение документов .docx / .pdf через self-hosted LLM</p>
     <span id="health" class="status">Проверка связи с моделью…</span>
 
-    <div class="panel">
-      <div class="row">
-        <div>
-          <label>Версия A (.docx / .pdf)</label>
-          <input type="file" id="fileA" accept=".docx,.pdf" />
-        </div>
-        <div>
-          <label>Версия B (.docx / .pdf)</label>
-          <input type="file" id="fileB" accept=".docx,.pdf" />
-        </div>
-      </div>
-      <div style="margin-top:16px">
-        <label>Что анализировать (необязательно)</label>
-        <textarea id="focus" placeholder="Например: обрати внимание на изменения сроков оплаты, штрафов и условий расторжения"></textarea>
-      </div>
-      <div class="actions">
-        <button id="run">Сравнить</button>
-        <div id="busy" class="actions hidden">
-          <div class="spinner"></div>
-          <span id="progress" class="progress">Анализ…</span>
-        </div>
-      </div>
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="compare">⇄ Сравнение документов</button>
+      <button class="tab-btn" data-tab="analyze">🔍 Анализ документа</button>
     </div>
 
-    <div id="result" class="hidden">
-      <div class="actions" style="margin-bottom:8px">
-        <button class="secondary" id="download">⤓ Скачать отчёт (.md)</button>
-        <button class="secondary" id="copy">⧉ Копировать</button>
+    <!-- ===== TAB: COMPARE ===== -->
+    <div id="tab-compare" class="tab-content active">
+      <div class="panel">
+        <div class="row">
+          <div>
+            <label>Версия A (.docx / .pdf)</label>
+            <input type="file" id="fileA" accept=".docx,.pdf" />
+          </div>
+          <div>
+            <label>Версия B (.docx / .pdf)</label>
+            <input type="file" id="fileB" accept=".docx,.pdf" />
+          </div>
+        </div>
+        <div style="margin-top:16px">
+          <label>Что анализировать (необязательно)</label>
+          <textarea id="focus" placeholder="Например: обрати внимание на изменения сроков оплаты, штрафов и условий расторжения"></textarea>
+        </div>
+        <div class="actions">
+          <button id="run">Сравнить</button>
+          <button class="convert-btn" id="convertCompare">⤓ Конвертировать в Markdown</button>
+          <div id="busy-compare" class="actions hidden">
+            <div class="spinner"></div>
+            <span id="progress-compare" class="progress">Анализ…</span>
+          </div>
+        </div>
       </div>
-      <div id="report"></div>
 
-      <details class="extracted">
-        <summary>Извлечённый Markdown: <span id="mdNameA">A</span></summary>
-        <button class="secondary" id="downloadA">⤓ Скачать .md</button>
-        <pre id="mdA" class="md-preview"></pre>
-      </details>
-      <details class="extracted">
-        <summary>Извлечённый Markdown: <span id="mdNameB">B</span></summary>
-        <button class="secondary" id="downloadB">⤓ Скачать .md</button>
-        <pre id="mdB" class="md-preview"></pre>
-      </details>
+      <div id="result-compare" class="hidden">
+        <div class="actions" style="margin-bottom:8px">
+          <button class="secondary" id="download">⤓ Скачать отчёт (.md)</button>
+          <button class="secondary" id="copy">⧉ Копировать</button>
+        </div>
+        <div id="report"></div>
+
+        <details class="extracted">
+          <summary>Извлечённый Markdown: <span id="mdNameA">A</span></summary>
+          <button class="secondary" id="downloadA">⤓ Скачать .md</button>
+          <pre id="mdA" class="md-preview"></pre>
+        </details>
+        <details class="extracted">
+          <summary>Извлечённый Markdown: <span id="mdNameB">B</span></summary>
+          <button class="secondary" id="downloadB">⤓ Скачать .md</button>
+          <pre id="mdB" class="md-preview"></pre>
+        </details>
+      </div>
+
+      <!-- Convert-only result (compare tab) -->
+      <div id="convert-result-compare" class="convert-result hidden"></div>
+    </div>
+
+    <!-- ===== TAB: ANALYZE ===== -->
+    <div id="tab-analyze" class="tab-content">
+      <div class="panel">
+        <div>
+          <label>Документ (.docx / .pdf)</label>
+          <input type="file" id="fileAnalyze" accept=".docx,.pdf" />
+        </div>
+        <div style="margin-top:16px">
+          <label>Вопрос к документу (необязательно)</label>
+          <textarea id="question" placeholder="Например: какие штрафные санкции предусмотрены? Или оставьте пустым для общего обзора"></textarea>
+        </div>
+        <div class="actions">
+          <button id="runAnalyze">Анализировать</button>
+          <button class="convert-btn" id="convertAnalyze">⤓ Конвертировать в Markdown</button>
+          <div id="busy-analyze" class="actions hidden">
+            <div class="spinner"></div>
+            <span id="progress-analyze" class="progress">Анализ…</span>
+          </div>
+        </div>
+      </div>
+
+      <div id="result-analyze" class="hidden">
+        <div class="actions" style="margin-bottom:8px">
+          <button class="secondary" id="download-analyze">⤓ Скачать отчёт (.md)</button>
+          <button class="secondary" id="copy-analyze">⧉ Копировать</button>
+        </div>
+        <div id="report-analyze"></div>
+
+        <details class="extracted">
+          <summary>Извлечённый Markdown: <span id="mdNameAnalyze">документ</span></summary>
+          <button class="secondary" id="downloadMdAnalyze">⤓ Скачать .md</button>
+          <pre id="mdAnalyze" class="md-preview"></pre>
+        </details>
+      </div>
+
+      <!-- Convert-only result (analyze tab) -->
+      <div id="convert-result-analyze" class="convert-result hidden"></div>
     </div>
   </div>
 
   <script>
     let lastMarkdown = "";
+    let lastMarkdownAnalyze = "";
     let lastNames = { a: "A", b: "B" };
     let lastMd = { a: "", b: "" };
+    let lastMdAnalyze = { name: "doc", md: "" };
 
-    // Экранирование произвольного текста перед вставкой в HTML (имена файлов и т.п.).
     function escapeHtml(s) {
       return String(s ?? "").replace(/[&<>"']/g, (c) => ({
         "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
       }[c]));
     }
 
+    // ----- Tabs -----
+    document.querySelectorAll(".tab-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+        document.querySelectorAll(".tab-content").forEach(t => t.classList.remove("active"));
+        btn.classList.add("active");
+        document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
+      });
+    });
+
+    // ----- Health -----
     async function checkHealth() {
       const el = document.getElementById("health");
       try {
@@ -134,6 +220,7 @@
       }
     }
 
+    // ----- Compare -----
     document.getElementById("run").addEventListener("click", async () => {
       const fa = document.getElementById("fileA").files[0];
       const fb = document.getElementById("fileB").files[0];
@@ -146,12 +233,13 @@
       lastNames = { a: fa.name, b: fb.name };
 
       const runBtn = document.getElementById("run");
-      const busy = document.getElementById("busy");
-      const result = document.getElementById("result");
+      const busy = document.getElementById("busy-compare");
+      const result = document.getElementById("result-compare");
       runBtn.disabled = true;
       busy.classList.remove("hidden");
       result.classList.add("hidden");
-      document.getElementById("progress").textContent =
+      document.getElementById("convert-result-compare").classList.add("hidden");
+      document.getElementById("progress-compare").textContent =
         "Анализ может занять до нескольких минут на больших документах…";
 
       try {
@@ -163,8 +251,6 @@
         const d = await r.json();
         lastMarkdown = d.report_markdown;
         lastMd = { a: d.markdown_a || "", b: d.markdown_b || "" };
-        // Извлечённый Markdown — это содержимое документа; показываем как сырой
-        // текст через textContent (не innerHTML), чтобы исключить XSS.
         document.getElementById("mdNameA").textContent = lastNames.a;
         document.getElementById("mdNameB").textContent = lastNames.b;
         document.getElementById("mdA").textContent = lastMd.a;
@@ -175,8 +261,6 @@
         const meta =
           `<div class="meta">${escapeHtml(d.doc_a_name)} → ${escapeHtml(d.doc_b_name)} `
           + `· режим: ${escapeHtml(modeLabel)} · ${d.tokens_a} / ${d.tokens_b} ток.</div>`;
-        // Ответ модели рендерим как markdown, но санитизируем результат: модель
-        // (или содержимое документа) может вернуть <script>/<img onerror> и т.п.
         const safeReport = DOMPurify.sanitize(marked.parse(d.report_markdown));
         document.getElementById("report").innerHTML = meta + safeReport;
         result.classList.remove("hidden");
@@ -188,34 +272,160 @@
       }
     });
 
-    document.getElementById("download").addEventListener("click", () => {
-      const blob = new Blob([lastMarkdown], { type: "text/markdown" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `сравнение_${lastNames.a}_vs_${lastNames.b}.md`.replace(/\.(docx|pdf)/gi, "");
-      a.click();
-      URL.revokeObjectURL(url);
-    });
+    document.getElementById("download").addEventListener("click", () => downloadMdBlob(lastMarkdown,
+      `сравнение_${lastNames.a}_vs_${lastNames.b}.md`.replace(/\.(docx|pdf)/gi, "")));
+    document.getElementById("copy").addEventListener("click", () =>
+      navigator.clipboard.writeText(lastMarkdown));
 
-    document.getElementById("copy").addEventListener("click", () => {
-      navigator.clipboard.writeText(lastMarkdown);
-    });
-
-    // Скачивание извлечённого Markdown отдельного документа.
-    function downloadMd(text, name) {
+    function downloadMdBlob(text, filename) {
       const blob = new Blob([text], { type: "text/markdown" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url;
-      a.download = `${name}.md`.replace(/\.(docx|pdf)/gi, "");
-      a.click();
+      a.href = url; a.download = filename; a.click();
       URL.revokeObjectURL(url);
     }
-    document.getElementById("downloadA")
-      .addEventListener("click", () => downloadMd(lastMd.a, lastNames.a));
-    document.getElementById("downloadB")
-      .addEventListener("click", () => downloadMd(lastMd.b, lastNames.b));
+
+    document.getElementById("downloadA").addEventListener("click", () =>
+      downloadMdBlob(lastMd.a, `${lastNames.a}.md`.replace(/\.(docx|pdf)/gi, "")));
+    document.getElementById("downloadB").addEventListener("click", () =>
+      downloadMdBlob(lastMd.b, `${lastNames.b}.md`.replace(/\.(docx|pdf)/gi, "")));
+
+    // ----- Analyze -----
+    document.getElementById("runAnalyze").addEventListener("click", async () => {
+      const f = document.getElementById("fileAnalyze").files[0];
+      if (!f) { alert("Выберите файл .docx или .pdf"); return; }
+
+      const fd = new FormData();
+      fd.append("file", f);
+      fd.append("question", document.getElementById("question").value);
+
+      const runBtn = document.getElementById("runAnalyze");
+      const busy = document.getElementById("busy-analyze");
+      const result = document.getElementById("result-analyze");
+      runBtn.disabled = true;
+      busy.classList.remove("hidden");
+      result.classList.add("hidden");
+      document.getElementById("convert-result-analyze").classList.add("hidden");
+      document.getElementById("progress-analyze").textContent =
+        "Анализ может занять несколько минут…";
+
+      try {
+        const r = await fetch("/api/analyze", { method: "POST", body: fd });
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({ detail: r.statusText }));
+          throw new Error(err.detail || "Ошибка сервера");
+        }
+        const d = await r.json();
+        lastMarkdownAnalyze = d.report_markdown;
+        lastMdAnalyze = { name: d.doc_name, md: d.markdown || "" };
+
+        document.getElementById("mdNameAnalyze").textContent = d.doc_name;
+        document.getElementById("mdAnalyze").textContent = lastMdAnalyze.md;
+
+        const meta = `<div class="meta">${escapeHtml(d.doc_name)} · ${d.tokens} ток.</div>`;
+        const safeReport = DOMPurify.sanitize(marked.parse(d.report_markdown));
+        document.getElementById("report-analyze").innerHTML = meta + safeReport;
+        result.classList.remove("hidden");
+      } catch (e) {
+        alert("Не удалось выполнить анализ:\n" + e.message);
+      } finally {
+        runBtn.disabled = false;
+        busy.classList.add("hidden");
+      }
+    });
+
+    document.getElementById("download-analyze").addEventListener("click", () =>
+      downloadMdBlob(lastMarkdownAnalyze,
+        `анализ_${lastMdAnalyze.name}.md`.replace(/\.(docx|pdf)/gi, "")));
+    document.getElementById("copy-analyze").addEventListener("click", () =>
+      navigator.clipboard.writeText(lastMarkdownAnalyze));
+    document.getElementById("downloadMdAnalyze").addEventListener("click", () =>
+      downloadMdBlob(lastMdAnalyze.md,
+        `${lastMdAnalyze.name}.md`.replace(/\.(docx|pdf)/gi, "")));
+
+    // ----- Convert helpers -----
+    function renderConvertResult(containerId, files) {
+      const container = document.getElementById(containerId);
+      container.innerHTML = "";
+      files.forEach(({ name, markdown }) => {
+        const item = document.createElement("div");
+        item.className = "convert-item";
+        const header = document.createElement("div");
+        header.className = "convert-item-header";
+        header.innerHTML = `<span class="convert-item-name">📄 ${escapeHtml(name)}</span>`;
+        const dlBtn = document.createElement("button");
+        dlBtn.className = "secondary";
+        dlBtn.textContent = "⤓ Скачать .md";
+        dlBtn.addEventListener("click", () =>
+          downloadMdBlob(markdown, `${name}.md`.replace(/\.(docx|pdf)/gi, "")));
+        header.appendChild(dlBtn);
+        const pre = document.createElement("details");
+        pre.className = "extracted";
+        pre.innerHTML = `<summary>Предпросмотр</summary>`;
+        const code = document.createElement("pre");
+        code.className = "md-preview";
+        code.textContent = markdown;
+        pre.appendChild(code);
+        item.appendChild(header);
+        item.appendChild(pre);
+        container.appendChild(item);
+      });
+      container.classList.remove("hidden");
+    }
+
+    // Convert in Compare tab
+    document.getElementById("convertCompare").addEventListener("click", async () => {
+      const fa = document.getElementById("fileA").files[0];
+      const fb = document.getElementById("fileB").files[0];
+      if (!fa && !fb) { alert("Выберите хотя бы один файл"); return; }
+
+      const fd = new FormData();
+      if (fa) fd.append("files", fa);
+      if (fb) fd.append("files", fb);
+
+      const btn = document.getElementById("convertCompare");
+      btn.disabled = true;
+      document.getElementById("convert-result-compare").classList.add("hidden");
+      try {
+        const r = await fetch("/api/convert", { method: "POST", body: fd });
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({ detail: r.statusText }));
+          throw new Error(err.detail || "Ошибка сервера");
+        }
+        const d = await r.json();
+        renderConvertResult("convert-result-compare", d.files);
+      } catch (e) {
+        alert("Ошибка конвертации:\n" + e.message);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    // Convert in Analyze tab
+    document.getElementById("convertAnalyze").addEventListener("click", async () => {
+      const f = document.getElementById("fileAnalyze").files[0];
+      if (!f) { alert("Выберите файл"); return; }
+
+      const fd = new FormData();
+      fd.append("files", f);
+
+      const btn = document.getElementById("convertAnalyze");
+      btn.disabled = true;
+      document.getElementById("convert-result-analyze").classList.add("hidden");
+      try {
+        const r = await fetch("/api/convert", { method: "POST", body: fd });
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({ detail: r.statusText }));
+          throw new Error(err.detail || "Ошибка сервера");
+        }
+        const d = await r.json();
+        renderConvertResult("convert-result-analyze", d.files);
+      } catch (e) {
+        alert("Ошибка конвертации:\n" + e.message);
+      } finally {
+        btn.disabled = false;
+      }
+    });
 
     checkHealth();
   </script>

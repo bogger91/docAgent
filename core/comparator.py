@@ -16,6 +16,14 @@ ProgressCb = Callable[[float, str], None]
 
 
 @dataclass
+class AnalysisResult:
+    report_markdown: str
+    doc_name: str
+    tokens: int
+    markdown: str
+
+
+@dataclass
 class ComparisonResult:
     report_markdown: str
     mode: str               # "whole" | "sectioned"
@@ -81,6 +89,27 @@ def compare_documents(
         markdown_a=md_a,
         markdown_b=md_b,
     )
+
+
+def analyze_document(
+    file: bytes,
+    name: str,
+    question: str = "",
+    progress: ProgressCb | None = None,
+) -> AnalysisResult:
+    """Анализирует один документ: отвечает на вопрос пользователя или делает обзор."""
+    progress = progress or _noop
+
+    progress(0.1, "Извлечение текста из документа…")
+    doc, md = extract_document_with_markdown(file, name)
+    tokens = count_tokens(doc.full_text)
+
+    progress(0.3, "Модель анализирует документ…")
+    prompt = prompts.build_analyze_prompt(name, doc.full_text, question)
+    report = llm_client.complete(prompts.ANALYZE_SYSTEM_PROMPT, prompt)
+
+    progress(1.0, "Готово")
+    return AnalysisResult(report_markdown=report, doc_name=name, tokens=tokens, markdown=md)
 
 
 def _compare_whole(
