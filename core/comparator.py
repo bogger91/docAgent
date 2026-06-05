@@ -12,9 +12,17 @@ from .extractor import extract_document_with_markdown
 from .models import Document
 
 
+_TOKEN_SAFETY_MARGIN = 0.95  # tiktoken недооценивает Qwen-токены ~на 3-5%
+
+
+def _safe_input(tokens: int) -> int:
+    """Консервативная оценка: добавляем 5% к числу токенов."""
+    return int(tokens / _TOKEN_SAFETY_MARGIN)
+
+
 def _output_budget(input_tokens: int) -> int:
-    """Сколько токенов оставляем под ответ модели."""
-    return max(512, settings.max_context - input_tokens)
+    """Токены под ответ: лимит минус консервативная оценка ввода."""
+    return max(512, settings.max_context - _safe_input(input_tokens))
 
 
 # Колбэк прогресса: (доля 0..1, текстовая метка). Используется UI для спиннера/лога.
@@ -70,7 +78,7 @@ def compare_documents(
     whole_input_tokens = count_tokens(prompts.SYSTEM_PROMPT) + count_tokens(whole_prompt)
     budget = settings.max_context - settings.min_output_tokens
 
-    if fits_whole(whole_input_tokens, budget):
+    if fits_whole(_safe_input(whole_input_tokens), budget):
         progress(0.2, "Документы помещаются целиком — сравниваю одним запросом…")
         report = _compare_whole(doc_a, doc_b, user_focus, progress, whole_prompt, whole_input_tokens)
         mode = "whole"
@@ -118,7 +126,7 @@ def analyze_document(
     text_budget = settings.max_context - settings.min_output_tokens - overhead
 
     # Если документ целиком помещается — один запрос.
-    if count_tokens(doc.full_text) <= text_budget:
+    if _safe_input(count_tokens(doc.full_text)) <= text_budget:
         progress(0.3, "Модель анализирует документ…")
         prompt = prompts.build_analyze_prompt(name, doc.full_text, question)
         input_tokens = count_tokens(prompts.ANALYZE_SYSTEM_PROMPT) + count_tokens(prompt)
@@ -228,10 +236,15 @@ def _compare_sectioned(
             0.2 + 0.6 * (i / total),
             f"Сравниваю раздел {i + 1}/{total}: {pair.title[:60]}…",
         )
-        # Обрезаем каждую сторону до половины бюджета, чтобы обе вместе влезли.
-        section_budget = (settings.max_context - settings.min_output_tokens) // 2
-        left = truncate_text_to_tokens(left, section_budget)
-        right = truncate_text_to_tokens(right, section_budget)
+        # Вычисляем бюджет под текст: общий лимит минус overhead промпта,
+        # минус резерв под ответ, минус 5% запас на погрешность токенизатора.
+        prompt_overhead = count_tokens(prompts.SYSTEM_PROMPT) + count_tokens(
+            prompts.build_section_prompt(pair.title, "", "", user_focus)
+        )
+        safe_budget = int((settings.max_context - settings.min_output_tokens - prompt_overhead) * 0.95)
+        side_budget = max(1, safe_budget // 2)
+        left = truncate_text_to_tokens(left, side_budget)
+        right = truncate_text_to_tokens(right, side_budget)
         prompt = prompts.build_section_prompt(pair.title, left, right, user_focus)
         input_tokens = count_tokens(prompts.SYSTEM_PROMPT) + count_tokens(prompt)
         note = llm_client.complete(
