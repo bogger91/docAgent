@@ -83,7 +83,7 @@
 <body>
   <div class="wrap">
     <h1>docAgent</h1>
-    <p class="sub">Анализ и сравнение документов .docx / .pdf через self-hosted LLM</p>
+    <p class="sub">Анализ и сравнение документов .docx / .pdf / .md через self-hosted LLM</p>
     <span id="health" class="status">Проверка связи с моделью…</span>
 
     <div class="tabs">
@@ -96,12 +96,12 @@
       <div class="panel">
         <div class="row">
           <div>
-            <label>Версия A (.docx / .pdf)</label>
-            <input type="file" id="fileA" accept=".docx,.pdf" />
+            <label>Версия A (.docx / .pdf / .md)</label>
+            <input type="file" id="fileA" accept=".docx,.pdf,.md" />
           </div>
           <div>
-            <label>Версия B (.docx / .pdf)</label>
-            <input type="file" id="fileB" accept=".docx,.pdf" />
+            <label>Версия B (.docx / .pdf / .md)</label>
+            <input type="file" id="fileB" accept=".docx,.pdf,.md" />
           </div>
         </div>
         <div style="margin-top:16px">
@@ -145,8 +145,8 @@
     <div id="tab-analyze" class="tab-content">
       <div class="panel">
         <div>
-          <label>Документ (.docx / .pdf)</label>
-          <input type="file" id="fileAnalyze" accept=".docx,.pdf" />
+          <label>Документ (.docx / .pdf / .md)</label>
+          <input type="file" id="fileAnalyze" accept=".docx,.pdf,.md" />
         </div>
         <div style="margin-top:16px">
           <label>Вопрос к документу (необязательно)</label>
@@ -224,7 +224,7 @@
     document.getElementById("run").addEventListener("click", async () => {
       const fa = document.getElementById("fileA").files[0];
       const fb = document.getElementById("fileB").files[0];
-      if (!fa || !fb) { alert("Выберите оба файла .docx или .pdf"); return; }
+      if (!fa || !fb) { alert("Выберите оба файла (.docx, .pdf или .md)"); return; }
 
       const fd = new FormData();
       fd.append("file_a", fa);
@@ -293,7 +293,7 @@
     // ----- Analyze -----
     document.getElementById("runAnalyze").addEventListener("click", async () => {
       const f = document.getElementById("fileAnalyze").files[0];
-      if (!f) { alert("Выберите файл .docx или .pdf"); return; }
+      if (!f) { alert("Выберите файл (.docx, .pdf или .md)"); return; }
 
       const fd = new FormData();
       fd.append("file", f);

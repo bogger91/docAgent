@@ -49,8 +49,8 @@ def _check_size_before_read(file: UploadFile) -> None:
 
 
 def _validate(file: UploadFile, data: bytes) -> None:
-    if not file.filename or not file.filename.lower().endswith((".docx", ".pdf")):
-        raise HTTPException(400, f"Файл '{file.filename}' не .docx и не .pdf")
+    if not file.filename or not file.filename.lower().endswith((".docx", ".pdf", ".md")):
+        raise HTTPException(400, f"Файл '{file.filename}' не .docx, не .pdf и не .md")
     if len(data) > MAX_FILE_BYTES:
         raise HTTPException(400, f"Файл '{file.filename}' больше {MAX_FILE_MB} МБ")
     if not data:

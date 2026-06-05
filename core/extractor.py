@@ -22,7 +22,13 @@ _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
 
 
 def convert_to_markdown(data: bytes, name: str) -> str:
-    """Конвертирует байты документа (.docx/.pdf) в плоский Markdown."""
+    """Конвертирует байты документа (.docx/.pdf/.md) в плоский Markdown."""
+    if name.lower().endswith(".md"):
+        # Markdown-файл уже является целевым форматом — просто декодируем.
+        try:
+            return data.decode("utf-8")
+        except UnicodeDecodeError:
+            return data.decode("utf-8", errors="replace")
     ext = ".pdf" if name.lower().endswith(".pdf") else ".docx"
     try:
         result = _md.convert_stream(
