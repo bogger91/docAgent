@@ -105,29 +105,81 @@ def analyze_document(
     question: str = "",
     progress: ProgressCb | None = None,
 ) -> AnalysisResult:
-    """Анализирует один документ: отвечает на вопрос пользователя или делает обзор."""
+    """Анализирует один документ посекционно, затем сводит в итоговый отчёт."""
     progress = progress or _noop
 
     progress(0.1, "Извлечение текста из документа…")
     doc, md = extract_document_with_markdown(file, name)
     tokens = count_tokens(doc.full_text)
 
-    progress(0.3, "Модель анализирует документ…")
     overhead = count_tokens(prompts.ANALYZE_SYSTEM_PROMPT) + count_tokens(
         prompts.build_analyze_prompt(name, "", question)
     )
     text_budget = settings.max_context - settings.min_output_tokens - overhead
-    doc_text = truncate_text_to_tokens(doc.full_text, max(1, text_budget))
-    prompt = prompts.build_analyze_prompt(name, doc_text, question)
-    input_tokens = count_tokens(prompts.ANALYZE_SYSTEM_PROMPT) + count_tokens(prompt)
-    report = llm_client.complete(
-        prompts.ANALYZE_SYSTEM_PROMPT,
-        prompt,
-        max_tokens=_output_budget(input_tokens),
-    )
+
+    # Если документ целиком помещается — один запрос.
+    if count_tokens(doc.full_text) <= text_budget:
+        progress(0.3, "Модель анализирует документ…")
+        prompt = prompts.build_analyze_prompt(name, doc.full_text, question)
+        input_tokens = count_tokens(prompts.ANALYZE_SYSTEM_PROMPT) + count_tokens(prompt)
+        report = llm_client.complete(
+            prompts.ANALYZE_SYSTEM_PROMPT,
+            prompt,
+            max_tokens=_output_budget(input_tokens),
+        )
+    else:
+        # Документ большой — анализируем секцию за секцией, затем сводим.
+        report = _analyze_sectioned(doc, name, question, text_budget, progress)
 
     progress(1.0, "Готово")
     return AnalysisResult(report_markdown=report, doc_name=name, tokens=tokens, markdown=md)
+
+
+def _analyze_sectioned(
+    doc: Document,
+    name: str,
+    question: str,
+    text_budget: int,
+    progress: ProgressCb,
+) -> str:
+    from .chunker import group_sections
+
+    chunks = group_sections(doc.sections, max_tokens=text_budget)
+    total = len(chunks) or 1
+    notes: list[str] = []
+
+    for i, chunk in enumerate(chunks):
+        progress(
+            0.2 + 0.6 * (i / total),
+            f"Анализирую часть {i + 1}/{total}…",
+        )
+        chunk_text = "\n\n".join(s.text for s in chunk)
+        chunk_text = truncate_text_to_tokens(chunk_text, text_budget)
+        prompt = prompts.build_analyze_prompt(name, chunk_text, question)
+        input_tokens = count_tokens(prompts.ANALYZE_SYSTEM_PROMPT) + count_tokens(prompt)
+        note = llm_client.complete(
+            prompts.ANALYZE_SYSTEM_PROMPT,
+            prompt,
+            max_tokens=_output_budget(input_tokens),
+        ).strip()
+        if note:
+            notes.append(note)
+
+    if not notes:
+        return "# Анализ документа\n\nНе удалось извлечь содержательную информацию."
+
+    if len(notes) == 1:
+        return notes[0]
+
+    progress(0.85, "Свожу части в итоговый отчёт…")
+    combined = "\n\n---\n\n".join(notes)
+    summary_prompt = prompts.build_analyze_summary_prompt(name, combined, question)
+    summary_input_tokens = count_tokens(prompts.ANALYZE_SYSTEM_PROMPT) + count_tokens(summary_prompt)
+    return llm_client.complete(
+        prompts.ANALYZE_SYSTEM_PROMPT,
+        summary_prompt,
+        max_tokens=_output_budget(summary_input_tokens),
+    )
 
 
 def _compare_whole(
@@ -176,6 +228,10 @@ def _compare_sectioned(
             0.2 + 0.6 * (i / total),
             f"Сравниваю раздел {i + 1}/{total}: {pair.title[:60]}…",
         )
+        # Обрезаем каждую сторону до половины бюджета, чтобы обе вместе влезли.
+        section_budget = (settings.max_context - settings.min_output_tokens) // 2
+        left = truncate_text_to_tokens(left, section_budget)
+        right = truncate_text_to_tokens(right, section_budget)
         prompt = prompts.build_section_prompt(pair.title, left, right, user_focus)
         input_tokens = count_tokens(prompts.SYSTEM_PROMPT) + count_tokens(prompt)
         note = llm_client.complete(
