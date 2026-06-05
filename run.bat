@@ -59,8 +59,19 @@ set "PIP_EXTRA_ARGS=%PIP_EXTRA_ARGS% --trusted-host pypi.org --trusted-host file
 :proxy_done
 
 REM --- Создание виртуального окружения при первом запуске ---
-if not exist ".venv\Scripts\python.exe" (
-    echo [2/4] Создаю виртуальное окружение через "%PY_CMD%"...
+REM Проверяем, что venv существует И реально работает (мог быть создан на другой машине)
+set "VENV_OK=0"
+if exist ".venv\Scripts\python.exe" (
+    ".venv\Scripts\python.exe" --version >nul 2>nul
+    if not errorlevel 1 set "VENV_OK=1"
+)
+if "%VENV_OK%"=="0" (
+    if exist ".venv" (
+        echo [2/4] Виртуальное окружение повреждено или создано на другой машине. Пересоздаю...
+        rmdir /s /q ".venv"
+    ) else (
+        echo [2/4] Создаю виртуальное окружение через "%PY_CMD%"...
+    )
     %PY_CMD% -m venv .venv
     if errorlevel 1 (
         echo [ОШИБКА] Не удалось создать venv.
