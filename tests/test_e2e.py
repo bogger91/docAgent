@@ -49,7 +49,7 @@ def test_compare_whole_mode(monkeypatch, contract_a, contract_b):
     """Маленькие документы влезают целиком → один запрос, mode=whole."""
     calls = []
 
-    def fake_complete(system_prompt: str, user_prompt: str) -> str:
+    def fake_complete(system_prompt: str, user_prompt: str, max_tokens: int | None = None) -> str:
         calls.append((system_prompt, user_prompt))
         # Проверяем, что в запрос попали оба документа и фокус пользователя.
         assert "ВЕРСИЯ A" in user_prompt and "ВЕРСИЯ B" in user_prompt
@@ -91,7 +91,7 @@ def test_compare_sectioned_mode(monkeypatch, contract_a, contract_b):
 
     seen_titles = []
 
-    def fake_complete(system_prompt: str, user_prompt: str) -> str:
+    def fake_complete(system_prompt: str, user_prompt: str, max_tokens: int | None = None) -> str:
         # Сводный запрос содержит маркер заметок; посекционные — заголовок раздела.
         if "посекционные заметки" in user_prompt.lower() or "заметк" in system_prompt.lower():
             return "# Итоговый отчёт\nКлючевые правки: стоимость, сроки, новый раздел."
@@ -132,7 +132,7 @@ def test_compare_passes_table_content_to_model(monkeypatch):
 
     captured = {}
 
-    def fake_complete(system_prompt: str, user_prompt: str) -> str:
+    def fake_complete(system_prompt: str, user_prompt: str, max_tokens: int | None = None) -> str:
         captured["prompt"] = user_prompt
         return "# Отчёт\nЦена консультации выросла с 5000 до 7000."
 

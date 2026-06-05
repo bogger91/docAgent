@@ -20,9 +20,9 @@ except Exception:  # tiktoken недоступен — грубая эврист
         return max(1, len(text) // 3)
 
 
-def fits_whole(doc_a_text: str, doc_b_text: str, budget: int) -> bool:
-    """Помещаются ли оба документа целиком в бюджет токенов."""
-    return count_tokens(doc_a_text) + count_tokens(doc_b_text) <= budget
+def fits_whole(prompt_tokens: int, budget: int) -> bool:
+    """Помещается ли полный промпт (включая обёртку и system) в бюджет токенов."""
+    return prompt_tokens <= budget
 
 
 def group_sections(sections: list[Section], max_tokens: int) -> list[list[Section]]:

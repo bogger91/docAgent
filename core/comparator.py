@@ -11,6 +11,12 @@ from .config import settings
 from .extractor import extract_document_with_markdown
 from .models import Document
 
+
+def _output_budget(input_tokens: int) -> int:
+    """Сколько токенов оставляем под ответ модели."""
+    return max(512, settings.max_context - input_tokens)
+
+
 # Колбэк прогресса: (доля 0..1, текстовая метка). Используется UI для спиннера/лога.
 ProgressCb = Callable[[float, str], None]
 
@@ -60,11 +66,13 @@ def compare_documents(
     tokens_a = count_tokens(text_a)
     tokens_b = count_tokens(text_b)
 
-    budget = settings.doc_token_budget
+    whole_prompt = prompts.build_whole_prompt(doc_a.name, text_a, doc_b.name, text_b, user_focus)
+    whole_input_tokens = count_tokens(prompts.SYSTEM_PROMPT) + count_tokens(whole_prompt)
+    budget = settings.max_context - settings.min_output_tokens
 
-    if fits_whole(text_a, text_b, budget):
+    if fits_whole(whole_input_tokens, budget):
         progress(0.2, "Документы помещаются целиком — сравниваю одним запросом…")
-        report = _compare_whole(doc_a, doc_b, user_focus, progress)
+        report = _compare_whole(doc_a, doc_b, user_focus, progress, whole_prompt, whole_input_tokens)
         mode = "whole"
         sections_compared = 1
     else:
@@ -106,20 +114,31 @@ def analyze_document(
 
     progress(0.3, "Модель анализирует документ…")
     prompt = prompts.build_analyze_prompt(name, doc.full_text, question)
-    report = llm_client.complete(prompts.ANALYZE_SYSTEM_PROMPT, prompt)
+    input_tokens = count_tokens(prompts.ANALYZE_SYSTEM_PROMPT) + count_tokens(prompt)
+    report = llm_client.complete(
+        prompts.ANALYZE_SYSTEM_PROMPT,
+        prompt,
+        max_tokens=_output_budget(input_tokens),
+    )
 
     progress(1.0, "Готово")
     return AnalysisResult(report_markdown=report, doc_name=name, tokens=tokens, markdown=md)
 
 
 def _compare_whole(
-    doc_a: Document, doc_b: Document, user_focus: str, progress: ProgressCb
+    doc_a: Document,
+    doc_b: Document,
+    user_focus: str,
+    progress: ProgressCb,
+    prompt: str,
+    input_tokens: int,
 ) -> str:
-    prompt = prompts.build_whole_prompt(
-        doc_a.name, doc_a.full_text, doc_b.name, doc_b.full_text, user_focus
-    )
     progress(0.4, "Модель анализирует документы…")
-    return llm_client.complete(prompts.SYSTEM_PROMPT, prompt)
+    return llm_client.complete(
+        prompts.SYSTEM_PROMPT,
+        prompt,
+        max_tokens=_output_budget(input_tokens),
+    )
 
 
 def _compare_sectioned(
@@ -153,7 +172,12 @@ def _compare_sectioned(
             f"Сравниваю раздел {i + 1}/{total}: {pair.title[:60]}…",
         )
         prompt = prompts.build_section_prompt(pair.title, left, right, user_focus)
-        note = llm_client.complete(prompts.SYSTEM_PROMPT, prompt).strip()
+        input_tokens = count_tokens(prompts.SYSTEM_PROMPT) + count_tokens(prompt)
+        note = llm_client.complete(
+            prompts.SYSTEM_PROMPT,
+            prompt,
+            max_tokens=_output_budget(input_tokens),
+        ).strip()
         compared += 1
 
         if note and note.lower() not in ("без изменений", "без изменений."):
@@ -164,8 +188,11 @@ def _compare_sectioned(
 
     section_notes = "\n\n".join(notes)
     progress(0.85, "Свожу посекционные заметки в итоговый отчёт…")
+    summary_prompt = prompts.build_summary_prompt(section_notes, user_focus)
+    summary_input_tokens = count_tokens(prompts.SUMMARY_SYSTEM_PROMPT) + count_tokens(summary_prompt)
     summary = llm_client.complete(
         prompts.SUMMARY_SYSTEM_PROMPT,
-        prompts.build_summary_prompt(section_notes, user_focus),
+        summary_prompt,
+        max_tokens=_output_budget(summary_input_tokens),
     )
     return summary, compared

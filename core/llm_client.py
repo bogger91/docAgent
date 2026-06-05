@@ -30,7 +30,7 @@ def _strip_thinking(text: str) -> str:
     return _THINK_RE.sub("", text).strip()
 
 
-def complete(system_prompt: str, user_prompt: str) -> str:
+def complete(system_prompt: str, user_prompt: str, max_tokens: int | None = None) -> str:
     """Один запрос к модели. Возвращает текст ответа без блока рассуждений."""
     if _MOCK:
         return (
@@ -39,9 +39,11 @@ def complete(system_prompt: str, user_prompt: str) -> str:
             "Документы успешно извлечены и отправлены бы на сравнение — "
             "подключите Qwen3 для получения настоящего анализа."
         )
+    effective_max_tokens = max_tokens or settings.min_output_tokens
     resp = _client.chat.completions.create(
         model=settings.model,
         temperature=settings.temperature,
+        max_tokens=effective_max_tokens,
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},

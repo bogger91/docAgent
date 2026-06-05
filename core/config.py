@@ -31,6 +31,8 @@ class Settings:
 
     # Полное окно контекста модели в токенах.
     max_context: int = _get_int("MAX_CONTEXT", 32000)
+    # Минимум токенов, резервируемых под ответ модели (независимо от размера ввода).
+    min_output_tokens: int = _get_int("MIN_OUTPUT_TOKENS", 1024)
     # Доля окна, зарезервированная под инструкции промпта и ответ модели.
     reserve_ratio: float = _get_float("RESERVE_RATIO", 0.35)
 
