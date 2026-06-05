@@ -25,6 +25,22 @@ def fits_whole(prompt_tokens: int, budget: int) -> bool:
     return prompt_tokens <= budget
 
 
+def truncate_text_to_tokens(text: str, max_tokens: int) -> str:
+    """Обрезает текст до max_tokens токенов, разбивая по словам."""
+    if count_tokens(text) <= max_tokens:
+        return text
+    words = text.split()
+    lo, hi = 0, len(words)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if count_tokens(" ".join(words[:mid])) <= max_tokens:
+            lo = mid
+        else:
+            hi = mid - 1
+    truncated = " ".join(words[:lo])
+    return truncated + "\n\n[...текст обрезан — документ превышает контекст модели...]"
+
+
 def group_sections(sections: list[Section], max_tokens: int) -> list[list[Section]]:
     """Группирует подряд идущие секции в чанки не больше max_tokens токенов.
 

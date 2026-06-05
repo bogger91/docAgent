@@ -6,7 +6,7 @@ from typing import Callable
 
 from . import llm_client, prompts
 from .aligner import align
-from .chunker import count_tokens, fits_whole
+from .chunker import count_tokens, fits_whole, truncate_text_to_tokens
 from .config import settings
 from .extractor import extract_document_with_markdown
 from .models import Document
@@ -113,7 +113,12 @@ def analyze_document(
     tokens = count_tokens(doc.full_text)
 
     progress(0.3, "Модель анализирует документ…")
-    prompt = prompts.build_analyze_prompt(name, doc.full_text, question)
+    overhead = count_tokens(prompts.ANALYZE_SYSTEM_PROMPT) + count_tokens(
+        prompts.build_analyze_prompt(name, "", question)
+    )
+    text_budget = settings.max_context - settings.min_output_tokens - overhead
+    doc_text = truncate_text_to_tokens(doc.full_text, max(1, text_budget))
+    prompt = prompts.build_analyze_prompt(name, doc_text, question)
     input_tokens = count_tokens(prompts.ANALYZE_SYSTEM_PROMPT) + count_tokens(prompt)
     report = llm_client.complete(
         prompts.ANALYZE_SYSTEM_PROMPT,
