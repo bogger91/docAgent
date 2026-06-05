@@ -238,3 +238,51 @@ def test_comparator_output_budget_positive(monkeypatch, contract_a, contract_b):
     compare_documents(contract_a, "a.docx", contract_b, "b.docx")
 
     assert max_tokens_used.get("value", 0) > 0
+
+
+# --- client-side token heuristic (Math.ceil(len / 3)) -------------------------
+# Фронтенд использует ~len/3 для живого счётчика токенов в textarea.
+# Здесь проверяем эквивалентный Python-расчёт, чтобы убедиться в согласованности
+# с серверной эвристикой-fallback из chunker.py (len // 3).
+
+def _client_token_hint(text: str) -> int:
+    """Реплика логики JS: Math.max(1, Math.ceil(text.length / 3))."""
+    import math
+    if not text:
+        return 0
+    return max(1, math.ceil(len(text) / 3))
+
+
+def test_token_hint_empty_string():
+    assert _client_token_hint("") == 0
+
+
+def test_token_hint_short_text():
+    # 3 символа → ceil(3/3) = 1
+    assert _client_token_hint("abc") == 1
+
+
+def test_token_hint_non_zero_for_any_nonempty():
+    assert _client_token_hint("я") >= 1
+    assert _client_token_hint("hello") >= 1
+
+
+def test_token_hint_grows_with_length():
+    short = _client_token_hint("привет")
+    long_ = _client_token_hint("привет " * 100)
+    assert long_ > short
+
+
+def test_token_hint_consistent_with_server_fallback():
+    """Клиентский ceil(len/3) и серверный floor(len/3) не должны расходиться
+    более чем на 1 токен на любую строку разумной длины."""
+    import math
+    texts = [
+        "Короткий текст",
+        "Например: какие штрафные санкции предусмотрены?",
+        "обрати внимание на изменения сроков оплаты, штрафов и условий расторжения" * 5,
+    ]
+    for text in texts:
+        client_val = _client_token_hint(text)
+        server_val = max(1, len(text) // 3)
+        assert abs(client_val - server_val) <= 1

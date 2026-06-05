@@ -250,3 +250,49 @@ def test_section_pairs_limit(monkeypatch, contract_a, contract_b):
     )
     assert r.status_code == 500
     assert "Слишком много секций" in r.json()["detail"]
+
+
+# --- /api/convert: токены в ответе -------------------------------------------
+
+def test_convert_returns_tokens_field(contract_a):
+    """/api/convert должен возвращать поле tokens для каждого файла."""
+    r = client.post(
+        "/api/convert",
+        files={"files": ("a.docx", contract_a, "application/octet-stream")},
+    )
+    assert r.status_code == 200
+    files = r.json()["files"]
+    assert len(files) == 1
+    assert "tokens" in files[0]
+    assert isinstance(files[0]["tokens"], int)
+    assert files[0]["tokens"] > 0
+
+
+def test_convert_tokens_match_markdown_length(contract_a):
+    """tokens должны соответствовать подсчёту count_tokens для возвращённого markdown."""
+    from core.chunker import count_tokens
+
+    r = client.post(
+        "/api/convert",
+        files={"files": ("a.docx", contract_a, "application/octet-stream")},
+    )
+    assert r.status_code == 200
+    item = r.json()["files"][0]
+    assert item["tokens"] == count_tokens(item["markdown"])
+
+
+def test_convert_tokens_for_multiple_files(contract_a, contract_b):
+    """При нескольких файлах tokens возвращается для каждого."""
+    r = client.post(
+        "/api/convert",
+        files=[
+            ("files", ("a.docx", contract_a, "application/octet-stream")),
+            ("files", ("b.docx", contract_b, "application/octet-stream")),
+        ],
+    )
+    assert r.status_code == 200
+    files = r.json()["files"]
+    assert len(files) == 2
+    for item in files:
+        assert "tokens" in item
+        assert item["tokens"] > 0

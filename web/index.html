@@ -78,6 +78,7 @@
     .convert-item { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 12px; }
     .convert-item-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; }
     .convert-item-name { font-size: 13px; font-weight: 600; }
+    .token-hint { color: var(--muted); font-size: 12px; margin-top: 4px; display: block; }
   </style>
 </head>
 <body>
@@ -107,6 +108,7 @@
         <div style="margin-top:16px">
           <label>Что анализировать (необязательно)</label>
           <textarea id="focus" placeholder="Например: обрати внимание на изменения сроков оплаты, штрафов и условий расторжения"></textarea>
+          <span class="token-hint" id="focus-tokens"></span>
         </div>
         <div class="actions">
           <button id="run">Сравнить</button>
@@ -151,6 +153,7 @@
         <div style="margin-top:16px">
           <label>Вопрос к документу (необязательно)</label>
           <textarea id="question" placeholder="Например: какие штрафные санкции предусмотрены? Или оставьте пустым для общего обзора"></textarea>
+          <span class="token-hint" id="question-tokens"></span>
         </div>
         <div class="actions">
           <button id="runAnalyze">Анализировать</button>
@@ -347,12 +350,13 @@
     function renderConvertResult(containerId, files) {
       const container = document.getElementById(containerId);
       container.innerHTML = "";
-      files.forEach(({ name, markdown }) => {
+      files.forEach(({ name, markdown, tokens }) => {
         const item = document.createElement("div");
         item.className = "convert-item";
         const header = document.createElement("div");
         header.className = "convert-item-header";
-        header.innerHTML = `<span class="convert-item-name">📄 ${escapeHtml(name)}</span>`;
+        const tokensLabel = tokens != null ? ` · ${tokens} ток.` : "";
+        header.innerHTML = `<span class="convert-item-name">📄 ${escapeHtml(name)}${tokensLabel}</span>`;
         const dlBtn = document.createElement("button");
         dlBtn.className = "secondary";
         dlBtn.textContent = "⤓ Скачать .md";
@@ -426,6 +430,15 @@
         btn.disabled = false;
       }
     });
+
+    function updateTokenHint(textareaId, hintId) {
+      const text = document.getElementById(textareaId).value;
+      const el = document.getElementById(hintId);
+      if (!text.length) { el.textContent = ""; return; }
+      el.textContent = `~${Math.max(1, Math.ceil(text.length / 3))} ток.`;
+    }
+    document.getElementById("focus").addEventListener("input", () => updateTokenHint("focus", "focus-tokens"));
+    document.getElementById("question").addEventListener("input", () => updateTokenHint("question", "question-tokens"));
 
     checkHealth();
   </script>

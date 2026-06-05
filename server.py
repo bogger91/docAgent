@@ -6,6 +6,7 @@ from pathlib import Path
 from fastapi import FastAPI, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 
+from core.chunker import count_tokens
 from core.comparator import analyze_document, compare_documents
 from core.config import settings
 from core.extractor import extract_document_with_markdown
@@ -129,7 +130,7 @@ async def convert(
         data = await f.read()
         _validate(f, data)
         _doc, md = extract_document_with_markdown(data, f.filename or "doc.docx")
-        results.append({"name": f.filename, "markdown": md})
+        results.append({"name": f.filename, "markdown": md, "tokens": count_tokens(md)})
     return JSONResponse({"files": results})
 
 
