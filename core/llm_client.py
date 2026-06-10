@@ -6,12 +6,15 @@
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
 
 from openai import OpenAI
 
 from .config import settings
+
+log = logging.getLogger(__name__)
 
 _MOCK = bool(os.getenv("MOCK_LLM", ""))
 
@@ -40,6 +43,25 @@ def complete(system_prompt: str, user_prompt: str, max_tokens: int | None = None
             "подключите Qwen3 для получения настоящего анализа."
         )
     effective_max_tokens = max_tokens or settings.min_output_tokens
+    sys_tokens = len(system_prompt.split())   # грубая оценка для лога
+    usr_tokens = len(user_prompt.split())
+    log.info(
+        "LLM request | max_tokens=%d | sys_words≈%d | usr_words≈%d | "
+        "sum_approx=%d | max_context=%d",
+        effective_max_tokens,
+        sys_tokens,
+        usr_tokens,
+        effective_max_tokens + sys_tokens + usr_tokens,
+        settings.max_context,
+    )
+    if effective_max_tokens + sys_tokens + usr_tokens > settings.max_context * 1.1:
+        log.warning(
+            "POTENTIAL OVERFLOW: max_tokens=%d exceeds safe budget "
+            "(max_context=%d, approx_input_words=%d)",
+            effective_max_tokens,
+            settings.max_context,
+            sys_tokens + usr_tokens,
+        )
     resp = _client.chat.completions.create(
         model=settings.model,
         temperature=settings.temperature,
@@ -49,6 +71,14 @@ def complete(system_prompt: str, user_prompt: str, max_tokens: int | None = None
             {"role": "user", "content": user_prompt},
         ],
     )
+    usage = resp.usage
+    if usage:
+        log.info(
+            "LLM response | prompt_tokens=%d | completion_tokens=%d | total_tokens=%d",
+            usage.prompt_tokens,
+            usage.completion_tokens,
+            usage.total_tokens,
+        )
     content = resp.choices[0].message.content or ""
     return _strip_thinking(content)
 

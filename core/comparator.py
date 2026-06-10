@@ -1,6 +1,7 @@
 """Оркестрация сравнения: выбор режима и сборка итогового отчёта."""
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Callable
 
@@ -10,6 +11,8 @@ from .chunker import count_tokens, fits_whole, truncate_text_to_tokens
 from .config import settings
 from .extractor import extract_document_with_markdown
 from .models import Document
+
+log = logging.getLogger(__name__)
 
 
 _TOKEN_SAFETY_MARGIN = 0.95  # tiktoken недооценивает Qwen-токены ~на 3-5%
@@ -22,7 +25,19 @@ def _safe_input(tokens: int) -> int:
 
 def _output_budget(input_tokens: int) -> int:
     """Токены под ответ: лимит минус консервативная оценка ввода."""
-    return max(512, settings.max_context - _safe_input(input_tokens))
+    safe = _safe_input(input_tokens)
+    budget = max(512, settings.max_context - safe)
+    total = safe + budget
+    log.debug(
+        "_output_budget | input=%d safe_input=%d output_budget=%d total=%d max_context=%d",
+        input_tokens, safe, budget, total, settings.max_context,
+    )
+    if total > settings.max_context:
+        log.warning(
+            "BUDGET OVERFLOW: safe_input=%d + output_budget=%d = %d > max_context=%d",
+            safe, budget, total, settings.max_context,
+        )
+    return budget
 
 
 # Колбэк прогресса: (доля 0..1, текстовая метка). Используется UI для спиннера/лога.
@@ -78,8 +93,16 @@ def compare_documents(
     whole_input_tokens = count_tokens(prompts.SYSTEM_PROMPT) + count_tokens(whole_prompt)
     budget = settings.max_context - settings.min_output_tokens
 
+    log.info(
+        "compare_documents | doc_a=%r tokens_a=%d | doc_b=%r tokens_b=%d | "
+        "whole_input_tokens=%d safe=%d budget=%d max_context=%d",
+        name_a, tokens_a, name_b, tokens_b,
+        whole_input_tokens, _safe_input(whole_input_tokens), budget, settings.max_context,
+    )
+
     if fits_whole(_safe_input(whole_input_tokens), budget):
         progress(0.2, "Документы помещаются целиком — сравниваю одним запросом…")
+        log.info("mode=whole | input_tokens=%d output_budget=%d", whole_input_tokens, _output_budget(whole_input_tokens))
         report = _compare_whole(doc_a, doc_b, user_focus, progress, whole_prompt, whole_input_tokens)
         mode = "whole"
         sections_compared = 1
@@ -247,10 +270,18 @@ def _compare_sectioned(
         right = truncate_text_to_tokens(right, side_budget)
         prompt = prompts.build_section_prompt(pair.title, left, right, user_focus)
         input_tokens = count_tokens(prompts.SYSTEM_PROMPT) + count_tokens(prompt)
+        out_budget = _output_budget(input_tokens)
+        log.info(
+            "section %d/%d %r | left_tokens=%d right_tokens=%d "
+            "input_tokens=%d output_budget=%d total=%d",
+            i + 1, total, pair.title[:60],
+            count_tokens(left), count_tokens(right),
+            input_tokens, out_budget, _safe_input(input_tokens) + out_budget,
+        )
         note = llm_client.complete(
             prompts.SYSTEM_PROMPT,
             prompt,
-            max_tokens=_output_budget(input_tokens),
+            max_tokens=out_budget,
         ).strip()
         compared += 1
 
@@ -264,9 +295,15 @@ def _compare_sectioned(
     progress(0.85, "Свожу посекционные заметки в итоговый отчёт…")
     summary_prompt = prompts.build_summary_prompt(section_notes, user_focus)
     summary_input_tokens = count_tokens(prompts.SUMMARY_SYSTEM_PROMPT) + count_tokens(summary_prompt)
+    sum_budget = _output_budget(summary_input_tokens)
+    log.info(
+        "summary request | notes_count=%d summary_input_tokens=%d output_budget=%d total=%d",
+        len(notes), summary_input_tokens, sum_budget,
+        _safe_input(summary_input_tokens) + sum_budget,
+    )
     summary = llm_client.complete(
         prompts.SUMMARY_SYSTEM_PROMPT,
         summary_prompt,
-        max_tokens=_output_budget(summary_input_tokens),
+        max_tokens=sum_budget,
     )
     return summary, compared
