@@ -15,7 +15,7 @@ from .models import Document
 log = logging.getLogger(__name__)
 
 
-_TOKEN_SAFETY_MARGIN = 0.95  # tiktoken недооценивает Qwen-токены ~на 3-5%
+_TOKEN_SAFETY_MARGIN = 0.68  # tiktoken недооценивает Qwen-токены до 37% (наблюдалось в prod)
 
 
 def _safe_input(tokens: int) -> int:
