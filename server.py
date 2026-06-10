@@ -1,6 +1,7 @@
 """FastAPI-сервер: отдаёт фронт и принимает документы на сравнение."""
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI, Form, HTTPException, UploadFile
@@ -11,6 +12,12 @@ from core.comparator import analyze_document, compare_documents
 from core.config import settings
 from core.extractor import extract_document_with_markdown
 from core.llm_client import health_check
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)-8s %(name)s | %(message)s",
+    datefmt="%H:%M:%S",
+)
 
 app = FastAPI(title="docAgent — сравнение docx через Qwen3")
 
